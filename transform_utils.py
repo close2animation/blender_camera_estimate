@@ -159,7 +159,18 @@ def mesh_list_to_tensor(mesh):
     return mesh 
 
 def tensor_to_mesh_list(tensor):
+    '''
+    converts a nx4 tensor into a nx3 list
+
+    Args:
+        mesh: nx3 list that describes a mesh
+    Returns:
+        nx4 tensor that describes a mesh in homogeneous coordinates
+
+    '''
     mesh = tensor.detach().tolist()
     for idx in range(tensor.shape[0]):
+        mesh[idx][:] = [x / mesh[idx][3] for x in mesh[idx]]
         del mesh[idx][3]
     return mesh
+
