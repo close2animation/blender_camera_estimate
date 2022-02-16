@@ -35,7 +35,7 @@ def loc_rot_to_matrix(location, rotation, convention):
     return transform
 
 
-def transform_tensor_to_Matrix(tensor):
+def tensor_to_Matrix(tensor):
     '''
     converts a 4x4 tensor into a 4x4 mathutils.Matrix
 
@@ -49,7 +49,7 @@ def transform_tensor_to_Matrix(tensor):
     return matrix
 
 
-def transform_Matrix_to_tensor(Matrix):
+def Matrix_to_tensor(Matrix):
     '''
     converts a 4x4 mathutils.Matrix into a 4x4 tensor
 
@@ -58,42 +58,38 @@ def transform_Matrix_to_tensor(Matrix):
     Returns:
         4x4 tensor
     '''
-    matrix_list = []
-    for row in Matrix:
-        row_list = []
-        for i in row:
-            row_list.append(i)
-        matrix_list.append(row_list)
-
-    matrix = torch.tensor(matrix_list)    
-    return matrix
+    matrix_list = [row[:] for row in Matrix]
+    return torch.tensor(matrix_list)
 
 
-def mesh_space_to_world(mesh, matrix_world):
+def mesh_space_to_world(data, matrix_world):
     '''
     takes vertices in the mesh space and converts them to world space
 
     Args:
-        mesh: bpy mesh type or list or verts.
+        data: bpy mesh type or list or verts.
         matrix_world: meshes 4x4 world matrix. mathutlis.Matrix
     Returns:
         list of mesh vertices in world space
     '''
     # checking if mesh type or list
-    try:
-        mesh = mesh.vertices
-        def get_value(vert):
-            return vert.co
-    except AttributeError:
-        def get_value(vert):
-            return vert
+    if isinstance(data, bpy.types.Object):
+        if data.type != 'MESH':
+            raise ValueError(f"Got an object of '{data.type}', but only 'MESH' type is supported.")
+        verts = data.data.vertices
+    elif isinstance(data, bpy.types.Mesh):
+        verts = data.vertices
+    elif isinstance(data, bmesh.types.BMesh):
+        verts = data.verts
+    elif isinstance(data, list):
+        verts = None
+    else:
+        raise TypeError(f"Expected a 'MESH' object, a mesh, a bmesh or a list, got {data} instead.")
     
-    # converting 
-    mesh_world = []
-    for vert in mesh:
-        v = matrix_world @ get_value(vert)
-        mesh_world.append(v)
-    return mesh_world
+    if verts:
+        return [matrix_world @ v.co for v in verts]
+    else:
+        return [matrix_world @ co for co in data]
 
 
 def create_object(verts, object_name):
@@ -143,7 +139,7 @@ def transform_mesh_tensor(mesh, transform):
     return mesh_new
 
 
-def mesh_list_to_tensor(mesh):
+def vert_list_to_tensor(mesh):
     '''
     convert a nx3 list into a nx4 tensor. extra dim to make it homogeneous.
 
@@ -158,7 +154,7 @@ def mesh_list_to_tensor(mesh):
     mesh = torch.hstack((mesh, ones))
     return mesh 
 
-def tensor_to_mesh_list(tensor):
+def tensor_to_vert_list(tensor):
     '''
     converts a nx4 tensor into a nx3 list
 
