@@ -124,7 +124,8 @@ def create_object(verts, object_name):
 
 def transform_mesh_tensor(mesh, transform):
     '''
-    takes nx4 tensor and transforms it with a 4x4 transformation matrix
+    takes nx4 tensor and transforms it with a 4x4 transformation matrix.
+    if the input is only shape nx3, a columns of 1's will be added.
 
     Args:
         mesh: nx4 tensor that describes a mesh
@@ -132,6 +133,10 @@ def transform_mesh_tensor(mesh, transform):
     Returns:
         list of mesh vertices in world space
     '''
+    if mesh.shape[1] == 3:
+        ones = torch.ones((mesh.shape[0], 1))
+        mesh = torch.hstack((mesh, ones))
+
     mesh_new = torch.tensor([])
     for vert in mesh:
         vert_new = torch.matmul(transform, vert)
@@ -169,4 +174,6 @@ def tensor_to_vert_list(tensor):
         mesh[idx][:] = [x / mesh[idx][3] for x in mesh[idx]]
         del mesh[idx][3]
     return mesh
+
+
 
