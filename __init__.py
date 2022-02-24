@@ -11,6 +11,7 @@ bl_info = {
 
 import bpy
 from .train import train
+from .train_copy import train_copy
 
 
 def register():

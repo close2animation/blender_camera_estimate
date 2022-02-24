@@ -2,6 +2,8 @@ import bpy
 import torch
 from .transform_utils import *
 
+# well this was a waste of time
+
 class camera_object():
     def __init__(self, camera_name):
         self.matrix = torch.tensor([[1, 0, 0, 0],
@@ -67,8 +69,6 @@ class camera_object():
             points = torch.cat((points, x))
 
         self.image_norm = points.reshape((self.mesh_norm.shape[0],3))
-        print(self.image_norm.shape)
-        print(self.matrix.shape)
-        self.image_world = transform_mesh_tensor(self.image_norm, self.matrix)
+        #self.image_world = transform_mesh_tensor(self.image_norm, self.matrix)
 
 

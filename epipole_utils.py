@@ -1,5 +1,6 @@
 import torch
-from .transform_utils import tensor_list
+from .transform_utils import tensor_list_to_tensor
+
 
 def calculate_fundamental_matrix(image2, image1):
     '''
@@ -58,19 +59,32 @@ def calculate_epipolar_constraint(image1, image2):
     e = [compute_epipole(F), compute_epipole(F_t)]
     return e
 
-    
-def tensor_list_to_tensor(tensor_list):
+
+def scale_base_line(e, scale, c):
     '''
-    turns a list of tensors into a tensor batch
+    scales base line. is this funtion too much?
+    '''
+    base_line = torch.vstack((e[0], e[1]))
+    base_line *= scale
+    base_line = torch.vstack((base_line, c))
+    return base_line
+
+
+def create_base_line(image1, image2, c, scale):
+    '''
+    gets the direction vector of cam2 and scales it.
 
     Args:
-        list of tensors
+        image1: nx3 tensor of mesh in image space
+        image2: nx3 tensor of mesh in image space
+        c: size 1 tensor with gradients. predicting camera constant. 
+        scale: size 1 tensor with gradients predicting  distance between cameras
     Returns:
-        tensor
+        baseline vector used to set camera 2's location. returns shape[3, 1]
     '''
-    # rewrite 151 camera
-    tensor_batch = tensor_list[0].unsqueeze(0)
-    for t in tensor_list[1:]:
-        tensor_batch = torch.cat((tensor_batch, t.unsqueeze(0)), 0)
-        
-    return tensor_batch
+    e = calculate_epipolar_constraint(image1, image2)
+    base_line1 = scale_base_line(e[0], scale, c)
+    base_line2 = scale_base_line(e[1], scale, c)
+    return base_line1, base_line2
+
+
