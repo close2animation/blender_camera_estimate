@@ -3,6 +3,7 @@ import torch
 from mathutils import Matrix, Vector
 from .pytorch3d_utils import euler_angles_to_matrix
 import bmesh
+from .pytorch3d_utils import quaternion_to_matrix
 
 
 def loc_rot_to_matrix(location, rotation, convention):
@@ -370,11 +371,12 @@ def rotation_difference(point, target):
         shape[4] quat that will rotate point to target
     '''
     axis_vector = torch.cross(point, target)
+    #print('axis_vector', axis_vector)
     axis_vector = normalise_vector(axis_vector)
     angle = angle_between_two_vectors(point, target)
-    print('angle: ', torch.rad2deg(angle))
+    #print('angle: ', torch.rad2deg(angle))
     quat = axis_angle_to_quaternion(angle, axis_vector)
-
+    '''
     target = target.reshape(3).detach().tolist()
     bpy.data.objects['target'].location = target
 
@@ -383,7 +385,7 @@ def rotation_difference(point, target):
 
     axis_vector = axis_vector.reshape(3).detach().tolist()
     bpy.data.objects['axis_vector'].location = axis_vector
-
+    '''
     return quat
 
 
@@ -407,3 +409,35 @@ def line_plane_intercept(p0, p1, p_co, p_no, epsilon=1e-6):
         u = u * fac
         return p0 + u
     return None
+
+
+def make_local_space(meshes):
+    meshes_new = torch.tensor([])
+    for i, mesh in enumerate(meshes):
+    #mesh = meshes[-3]
+        origin = mesh[0]
+        mesh = offset_verts(mesh, origin)
+
+        quat = rotation_difference(mesh[-1], torch.tensor((0, 0, 1.)))
+        mat_rot = quaternion_to_matrix(quat)
+        mesh = transform_mesh_tensor(mesh, mat_rot)
+
+        target = torch.tensor((0, 1., 0))
+        point = torch.tensor((mesh[5][0], mesh[5][1], 0))
+        quat = rotation_difference(point, target)
+        mat_rot = quaternion_to_matrix(quat)
+        mesh = transform_mesh_tensor(mesh, mat_rot)
+        meshes_new = torch.cat((meshes_new, mesh.unsqueeze(0)), 0)
+
+    return meshes_new 
+
+
+def save_angles(meshes):
+    mesh_list = torch.tensor([])
+    for mesh in meshes:
+        angle_list = torch.tensor([])
+        for vert in mesh[1:]:
+            angle = angle_between_two_vectors(vert, mesh[11])
+            angle_list = torch.cat((angle_list, angle.unsqueeze(0)), 0)
+        mesh_list = torch.cat((mesh_list, angle_list.unsqueeze(0)), 0)
+    return mesh_list

@@ -10,13 +10,20 @@ bl_info = {
 }
 
 import bpy
-from .train import train
-from .train_copy import train_copy
+from .train_two_cam import train
+from .operators import *
 
+classes = [
+    pytorch_create_camera,
+    pytorch_camera_position_manual,
+    pytorch_camera_position_auto,
+    VIEW3D_PT_pytorch_camera]
 
 def register():
-    ...
+    for cls in classes:
+        bpy.utils.register_class(cls)
 
 
 def unregister():
-    ...
+    for cls in classes:
+        bpy.utils.unregister_class(cls)

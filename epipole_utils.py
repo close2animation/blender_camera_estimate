@@ -65,8 +65,9 @@ def scale_base_line(e, scale, c):
     scales base line. is this funtion too much?
     '''
     base_line = torch.vstack((e[0], e[1]))
-    base_line *= scale
     base_line = torch.vstack((base_line, c))
+    base_line *= scale
+    
     return base_line
 
 
