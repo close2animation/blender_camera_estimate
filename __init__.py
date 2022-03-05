@@ -17,6 +17,7 @@ classes = [
     pytorch_create_camera,
     pytorch_camera_position_manual,
     pytorch_camera_position_auto,
+    pytorch_camera_save_epipole,
     VIEW3D_PT_pytorch_camera]
 
 def register():

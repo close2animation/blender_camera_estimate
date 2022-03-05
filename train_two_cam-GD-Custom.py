@@ -115,23 +115,26 @@ def create_pred_mesh(offset1, direction_vectors1, offset2, direction_vectors2):
     return pred_mesh
 
 
-def create_relative_postion(image1, image2, c, offset1, offset2):
+def create_relative_postion(image1, image2, c, scale):
     '''
     takes an image and transforms it into a 3d object facing -z. y is hieght and x is width. 
-    then rotates it so that image2's epipole lies on the same line as image1's epipole.
-    then twists an arbitrary image point along the baseline till it lies on the epipolar plane. 
+    then uses 8 point algorithm to find image2's relative postion to image1.
     Args:
         image1: 2d image points, tensor
         image2: 2d image points, tensor
         image_size: height and width of image, int. assumes square image.
         c: 1d tensor, camera constant
-
+        scale: 1d tensor, used to scale the epipole vector which defines distance between camera origins  
     Returns:
         image_mesh1: image1 as mesh with no rotation or location transform. 
         image_mesh2: image2 with transforms placing it relative to image1
         offset1: image2 offset from image1
     
     '''
+    offset1, offset2 = create_base_line(
+        make_homogeneous(image1), make_homogeneous(image2), c, scale)       
+    offset1 = offset1.reshape(3)
+
     # this creates the mesh local space 
     image_mesh1 = image_to_tensor(image1, c)
     image_mesh2 = image_to_tensor(image2, c)
@@ -153,7 +156,7 @@ def create_relative_postion(image1, image2, c, offset1, offset2):
     target -= offset1
     image_point = image_mesh2[0] - offset1
 
-    # replace this with rotation difference but need to add custom axis angle option to it <-------------------------------- change this later
+    # replace with rotation difference but need to add custom axis angle option to it
     axis_vector = normalise_vector(offset1)
     angle = angle_between_two_vectors(image_point, target)
     quat = axis_angle_to_quaternion(angle, axis_vector)
@@ -163,8 +166,7 @@ def create_relative_postion(image1, image2, c, offset1, offset2):
     image_mesh2 = offset_verts(image_mesh2, offset_inverted)
     image_mesh2 = transform_mesh_tensor(image_mesh2, matrix_twist)
     image_mesh2 = offset_verts(image_mesh2, offset1)
-
-    return image_mesh1, image_mesh2, (matrix_twist @ matrix_rot)
+    return image_mesh1, image_mesh2, offset1, (matrix_twist @ matrix_rot)
 
 
 def mesh_from_image_meshes(image_mesh1, image_mesh2, offset):
@@ -181,33 +183,34 @@ def mesh_from_image_meshes(image_mesh1, image_mesh2, offset):
     return mesh_3d
 
 
-def train(images1, images2, e):
+def train(images1, images2):
     print('test')
     images1 = torch.from_numpy(images1).float()
     images2 = torch.from_numpy(images2).float()
 
     scale = torch.tensor((5.))
     c = torch.tensor((-1.), requires_grad=True)
-    lr = 0.1
+    lr = 0.01
     criterion = torch.nn.MSELoss()
     optimizer1 = torch.optim.Adam([c], lr=lr)
-    epochs = 300
-    offset = e[0]
+    epochs = 100
 
     for epoch in range(epochs):
+        meshes = torch.tensor([])
+        # skipping first image since it will be origin camera 
         # create mesh data
         meshes = torch.tensor([])
         rotations = torch.tensor([])
         for idx, (image1, image2) in enumerate(zip(images1, images2)):
-            image1, image2, rotation = create_relative_postion(image1, image2, c, e[0], e[1])
+            print(image1[:, :2])
+            image1, image2, offset, rotation = create_relative_postion(image1[:, :2], image2[:, :2], c, scale)
             mesh = mesh_from_image_meshes(image1, image2, offset)
             meshes = torch.cat((meshes, mesh.unsqueeze(0)), 0)
             rotations = torch.cat((rotations, rotation.unsqueeze(0)), 0)
 
-        # display in blender    
         meshes = make_local_space(meshes)
         loss = torch.tensor(0.)
-        for mesh in meshes:
+        for mesh in meshes[1:]:
             loss += criterion(mesh, meshes[0])
         total_loss = loss / meshes.shape[0]
 
