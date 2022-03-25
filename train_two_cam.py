@@ -2,11 +2,10 @@ import bpy
 import torch
 import math
 import numpy as np
-from .epipole_utils import create_base_line
-from .camera import camera_object
 from .transform_utils import *
 from .pytorch3d_utils import quaternion_to_matrix
 import cv2
+from .blend_data_utils import *
 
 
 def norm_image(image, image_size):
@@ -115,7 +114,7 @@ def create_pred_mesh(offset1, direction_vectors1, offset2, direction_vectors2):
     return pred_mesh
 
 
-def create_relative_postion(image1, image2, c, offset1, offset2):
+def create_relative_postion(image1, image2, c, offset1, offset2, invert):
     '''
     takes an image and transforms it into a 3d object facing -z. y is hieght and x is width. 
     then rotates it so that image2's epipole lies on the same line as image1's epipole.
@@ -133,15 +132,25 @@ def create_relative_postion(image1, image2, c, offset1, offset2):
     
     '''
     # this creates the mesh local space 
+    print(c)
+    offset1[2] = c
+    offset2[2] = c
     image_mesh1 = image_to_tensor(image1, c)
     image_mesh2 = image_to_tensor(image2, c)
+    # just for testing 
+    #image_mesh1 = torch.vstack((image_mesh1, torch.tensor([0, 0, 0])))
+    #image_mesh2 = torch.vstack((image_mesh2, torch.tensor([0, 0, 0])))
     image_mesh1 = torch.vstack((image_mesh1, offset1.reshape((1, 3))))
     image_mesh2 = torch.vstack((image_mesh2, offset2.reshape((1, 3))))
 
     # placing img2 into world space assuming img1 is (0,0,0). do this by:
     # - offsetting img2 by img1 epipole
     # - rotating img2 so epipole lies along base line.
-    offset_inverted = offset1 * -1
+    if invert:
+        #offset_inverted = torch.tensor([(-offset1[0]), (-offset1[1]), offset1[2]])
+        offset_inverted = offset1 * -1
+    else:
+        offset_inverted = offset1
     quat = rotation_difference(image_mesh2[-1], offset_inverted)
     matrix_rot = quaternion_to_matrix(quat)
     image_mesh2 = transform_mesh_tensor(image_mesh2, matrix_rot)
@@ -163,7 +172,6 @@ def create_relative_postion(image1, image2, c, offset1, offset2):
     image_mesh2 = offset_verts(image_mesh2, offset_inverted)
     image_mesh2 = transform_mesh_tensor(image_mesh2, matrix_twist)
     image_mesh2 = offset_verts(image_mesh2, offset1)
-
     return image_mesh1, image_mesh2, (matrix_twist @ matrix_rot)
 
 
@@ -173,7 +181,7 @@ def mesh_from_image_meshes(image_mesh1, image_mesh2, offset):
     '''
     offset_inverted = offset * -1
     mesh_3d = torch.tensor([])
-    for vert1, vert2 in zip(image_mesh1[:-1], image_mesh2[:-1]):
+    for vert1, vert2 in zip(image_mesh1, image_mesh2):
         origin1 = torch.tensor((0, 0, 0))
         direction2 = vert2 + offset_inverted
         middle = get_middle_point(origin1, vert1, offset, direction2)
@@ -181,56 +189,48 @@ def mesh_from_image_meshes(image_mesh1, image_mesh2, offset):
     return mesh_3d
 
 
-def train(images1, images2, e):
-    print('test')
-    images1 = torch.from_numpy(images1).float()
-    images2 = torch.from_numpy(images2).float()
+def create_preds(context, loc, rotation, c1, c2, images1, images2):
+    '''
+    takes the image data and creates a mesh with it. then reprojects said mesh back into image space. returns the results
 
-    scale = torch.tensor((5.))
-    c = torch.tensor((-1.), requires_grad=True)
-    lr = 0.1
-    criterion = torch.nn.MSELoss()
-    optimizer1 = torch.optim.Adam([c], lr=lr)
-    epochs = 300
-    offset = e[0]
+    Args:
+        context: bpy context
+        loc: location of camera two. tensor shape[3]
+        rotation: rotation of camera two. tensor shape[3]
+        c: tensor shape[1]
+        images1: tensor shape[n, 2]
+        images2: tensor shape[n, 2]
+    Returns:
+        preds_1: image of newly created mesh in camera 1.tensor shape[]
+        preds_2: image of newly created mesh in camera 2. tensor shape[]
+    '''
+    preds_1 = []
+    preds_2 = []
+    meshes = []
+    for image1, image2 in zip(images1, images2):
+        image1 = image_to_tensor(image1, c1)
+        image2 = image_to_tensor(image2, c2)
+        # adjust camera 2 
+        rot = euler_angles_to_matrix(rotation, 'XYZ')
+        image2 = transform_mesh_tensor(image2, rot)
+        image2 = offset_verts(image2, -loc)
+        mesh = mesh_from_image_meshes(image1, image2, loc)
+        meshes.append(mesh)
+        # create new image 1
+        image1_pred = project_mesh_to_camera_space(make_homogeneous(mesh), c1)
+        image1_pred = image1_pred[:, :2]
+        preds_1.append(image1_pred)
+        # create image 2
+        mesh = offset_verts(mesh, loc)
+        mesh = transform_mesh_tensor(mesh, rot.inverse())
+        image2_pred = project_mesh_to_camera_space(make_homogeneous(mesh), c2)
+        image2_pred = image2_pred[:, :2]
+        preds_2.append(image2_pred)
 
-    for epoch in range(epochs):
-        # create mesh data
-        meshes = torch.tensor([])
-        rotations = torch.tensor([])
-        for idx, (image1, image2) in enumerate(zip(images1, images2)):
-            image1, image2, rotation = create_relative_postion(image1, image2, c, e[0], e[1])
-            mesh = mesh_from_image_meshes(image1, image2, offset)
-            meshes = torch.cat((meshes, mesh.unsqueeze(0)), 0)
-            rotations = torch.cat((rotations, rotation.unsqueeze(0)), 0)
+    preds_1 = tensor_list_to_tensor(preds_1)    
+    preds_2 = tensor_list_to_tensor(preds_2)    
+    return preds_1, preds_2, meshes
 
-        # display in blender    
-        meshes = make_local_space(meshes)
-        loss = torch.tensor(0.)
-        for mesh in meshes:
-            loss += criterion(mesh, meshes[0])
-        total_loss = loss / meshes.shape[0]
 
-        print('total_loss', total_loss)
-        print('c: ', c)
-        if total_loss < .00001:
-            break
-
-        total_loss.backward()
-        optimizer1.step()
-        optimizer1.zero_grad()
-
-    print('')
-    print('total_loss', total_loss)
-    print('c: ', c)
-
-    for i, mesh in enumerate(meshes):
-        create_object(mesh, f'mesh{i}')
-
-    
-     
-
-    
-    #create_object(image_mesh2, 'image 2')
 
 

@@ -280,6 +280,7 @@ def get_middle_point(l1, u1, l2, u2):
     A = torch.cat((Ap[:2].unsqueeze(0), Aq[:2].unsqueeze(0)), 0)
 
     x = A.pinverse() @ b
+    # they said they fixed this but still didn't work
     #x = torch.linalg.lstsq(A, b)[0]
 
     p = u1 * x[1] + l1
@@ -441,3 +442,53 @@ def save_angles(meshes):
             angle_list = torch.cat((angle_list, angle.unsqueeze(0)), 0)
         mesh_list = torch.cat((mesh_list, angle_list.unsqueeze(0)), 0)
     return mesh_list
+
+
+def rot_to_matrix(rot):
+    x = torch.tensor([
+        [1, 0, 0],
+        [0, torch.cos(rot[0]), -torch.sin(rot[0])],
+        [0, torch.sin(rot[0]), torch.cos(rot[0])]
+    ])
+    y = torch.tensor([
+        [torch.cos(rot[1]), 0, torch.sin(rot[1])],
+        [0, 1, 0],
+        [-torch.sin(rot[1]), 0, torch.cos(rot[1])]
+    ])
+    z = torch.tensor([
+        [torch.cos(rot[2]), -torch.sin(rot[2]), 0],
+        [torch.sin(rot[2]), torch.cos(rot[2]), 0],
+        [0, 0, 1]
+    ]) 
+    print(x.requires_grad)
+    return z @ (y @ x)
+
+
+def project_mesh_to_camera_space(mesh_norm, c):
+    '''
+    projects normalised mesh points onto camera plane. 
+
+    Args:
+        mesh_norm: tensor shape[n, 3]
+        c: distance of image plane from origin. tensor shape[1]
+    Returns:
+        image shape[n, 2]
+    '''
+    zero = torch.zeros(1)
+    top_row = torch.stack((c, zero, zero, zero), 1).squeeze(0)
+    mid_row = torch.stack((zero, c, zero, zero), 1).squeeze(0)
+    bot_row = torch.tensor([0, 0, 1., 0])
+    K = torch.stack((top_row, mid_row, bot_row))
+    
+    points = torch.tensor([]).float()
+    for vert in mesh_norm:
+        x = torch.matmul(K, vert)
+        x = torch.divide(x, x[2])
+        x[2] = -x[2]
+        #x[2] = x[2] * -c
+        x2 = x[2] * -c
+        x = x[:2]
+        x = torch.cat((x, x2), 0)             
+        points = torch.cat((points, x))            
+    image_norm = points.reshape((mesh_norm.shape[0],3))
+    return image_norm

@@ -2,7 +2,6 @@ import bpy
 import torch
 from .transform_utils import *
 
-# well this was a waste of time
 
 class camera_object():
     def __init__(self, camera_name):
@@ -16,15 +15,7 @@ class camera_object():
         self.constant = None
         self.image_norm = None
         self.image_world = None
-        self.import_camera(camera_name)      
-
-
-    def import_camera(self, camera_name):
-        '''
-        dont wanna import an object over an over
-        so just assigning for now 
-        '''
-        self.bpy_camera = bpy.data.objects[camera_name]
+        self.bpy_camera = bpy.data.objects[camera_name]   
 
 
     def normalise_mesh(self):

@@ -58,7 +58,8 @@ def euler_angles_to_matrix(euler_angles: torch.Tensor, convention: str) -> torch
         for c, e in zip(convention, torch.unbind(euler_angles, -1))
     ]
     # return functools.reduce(torch.matmul, matrices)
-    return torch.matmul(torch.matmul(matrices[0], matrices[1]), matrices[2])
+    # reversed for blender
+    return torch.matmul(torch.matmul(matrices[2], matrices[1]), matrices[0])
 
 
 def _axis_angle_rotation(axis: str, angle: torch.Tensor) -> torch.Tensor:
