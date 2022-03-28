@@ -232,5 +232,9 @@ def create_preds(context, loc, rotation, c1, c2, images1, images2):
     return preds_1, preds_2, meshes
 
 
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group['lr']
+
 
 

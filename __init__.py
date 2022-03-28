@@ -1,3 +1,10 @@
+import bpy
+import sys
+import subprocess
+import ensurepip
+import os
+import imp
+
 bl_info = {
     "name" : "pytorch_camera",
     "author" : "close",
@@ -8,6 +15,29 @@ bl_info = {
     "warning" : "",
     "category" : "Generic"
 }
+
+def install_libs(): 
+    ensurepip.bootstrap()
+    os.environ.pop("PIP_REQ_TRACKER", None)
+    version = bpy.app.version_string
+    version = int(version[2])
+    path = sys.executable
+    path = path.split('bin')[0]
+    path = path + 'lib\site-packages'
+    python_path = sys.executable
+
+    subprocess.check_output([python_path, '-m', 'pip', 'install', 'opencv-python', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', 'mediapipe', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', '--ignore-installed', 'six', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', '--ignore-installed', 'attrs', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', '--ignore-installed', 'matplotlib', '-t', path])
+    subprocess.check_output([python_path, '-m', 'pip', 'install', '--ignore-installed', 'torch', '-t', path])
+
+try:
+    imp.find_module('mediapipe')
+    imp.find_module('mediapipe')
+except ImportError:
+    install_libs()
 
 import bpy
 from .operators import *

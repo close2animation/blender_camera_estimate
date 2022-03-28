@@ -14,17 +14,24 @@ from pathlib import Path
 class My_settings(bpy.types.PropertyGroup):
     fps: bpy.props.FloatProperty(name="FPS", default=24.0, min=0, max=60)
     scale: bpy.props.FloatProperty(name="video scale", default=1, min=0, max=1)
-    c: bpy.props.FloatProperty(name="camera constant", default=-2, max=0)
+    c1: bpy.props.FloatProperty(name="camera constant 1", default=-1, max=0)
+    c2: bpy.props.FloatProperty(name="camera constant 2", default=-1, max=0)
     video_path: bpy.props.StringProperty(name="video path", default='') 
     lock_fps : bpy.props.BoolProperty(name='lock fps', default=False)
     t_hand : bpy.props.BoolProperty(name='track hand', default=True)
     t_head : bpy.props.BoolProperty(name='track head', default=True)
     t_pose : bpy.props.BoolProperty(name='track pose', default=True)
     cam_flip : bpy.props.BoolProperty(name='filp camera', default=False)
-    video_idx : bpy.props.IntProperty(name='video index', default=1, min=1, max=2)
+    video_idx : bpy.props.IntProperty(name='video index', default=1, min=1, max=10)
     tracking_confidence : bpy.props.FloatProperty(name="tracking confidence", default=.9, min=0, max=1)
     collection_1 : bpy.props.StringProperty(default='')
     collection_2 : bpy.props.StringProperty(default='')
+    reduce_bool : bpy.props.BoolProperty(name='reduce images', default=True)
+    reduce_amount : bpy.props.IntProperty(name='reduce amount', default=50, min=10)
+    epochs : bpy.props.IntProperty(name='epochs', default=100, min=1)
+    lr : bpy.props.FloatProperty(name="learning rate", default=0.1, max=1)
+    loc_r : bpy.props.FloatVectorProperty(default=(0, 0, 0))
+    find_c : bpy.props.BoolProperty(name='find c', default=False)
 
 
 class OT_load_data(bpy.types.Operator, ImportHelper):  
@@ -320,52 +327,64 @@ class pytorch_camera_position_pass2(bpy.types.Operator):
     bl_options = {'REGISTER','UNDO'}
 
     def execute(self, context):
-        lr = 0.5
-        criterion = torch.nn.MSELoss()
-        epochs = 10
         my_tool = context.scene.my_tool
-        c1 = torch.tensor([my_tool.c], requires_grad=True)
-        c2 = torch.tensor([my_tool.c], requires_grad=True)
-
-        loc = bpy.data.objects['camera_1'].location
+        criterion = torch.nn.MSELoss()
+        c1 = torch.tensor([my_tool.c1], requires_grad=True)
+        c2 = torch.tensor([my_tool.c2], requires_grad=True)
+        loc = bpy.data.objects['camera_2'].location
         loc = torch.tensor(loc)
-        loc_r = torch.tensor([0., 0., 0.], requires_grad=True)
-        rot = bpy.data.objects['camera_1'].rotation_euler
+        loc_r = torch.tensor(my_tool.loc_r, requires_grad=True)
+        rot = bpy.data.objects['camera_2'].rotation_euler
         rot = torch.tensor(rot, requires_grad=True)
-        optimizer = torch.optim.Adam([c1, c2], lr=lr)
+
+        if my_tool.find_c:
+            optimizer = torch.optim.Adam([c1, c2, loc_r, rot], lr=my_tool.lr)
+        else:
+            optimizer = torch.optim.Adam([loc_r, rot], lr=my_tool.lr)
 
         # create image data
         images1, images2 = collect_images(my_tool.collection_1, my_tool.collection_2)
-        images1, images2 = reduce_img_amount(images1, images2, 200)
+        if my_tool.reduce_bool:
+            images1, images2 = reduce_img_amount(images1, images2, my_tool.reduce_amount)
         images1 = tensor_list_to_tensor(images1)
         images2 = tensor_list_to_tensor(images2)
 
-        for epoch in range(epochs):
+        if not images1.shape == images2.shape:
+            self.report({"WARNING"}, "image points don't match")
+            return {"CANCELLED"}
+
+        for epoch in range(my_tool.epochs):
             # images loss
             loc_new = euler_angles_to_matrix(loc_r, 'XYZ')
             loc_new = loc_new @ loc
             images1_pred, images2_pred, meshes = create_preds(context, loc_new, rot, c1, c2, images1, images2)
+
             loss1 = criterion(images1_pred, images1)
             loss2 = criterion(images2_pred, images2)
             loss = loss1 + loss2
+            print('epoch: ', epoch, f'{(epoch/my_tool.epochs) * 100}% done.')
             print('rotation: ', rot)
             print('location: ', loc_r)
             print('c1: ', c1)
             print('c2: ', c2)
             print('loss: ', loss)
-
             loss.backward()
             optimizer.step()
             optimizer.zero_grad()
         
+        my_tool.lr = get_lr(optimizer)
+        print(my_tool.lr)
         # update camera
-        bpy.data.objects['camera_result'].location = (loc_new[0], loc_new[1], loc_new[2])
-        bpy.data.objects['camera_result'].rotation_euler = (rot[0], rot[1], rot[2])
+        bpy.data.objects['camera_2'].location = (loc_new[0], loc_new[1], loc_new[2])
+        bpy.data.objects['camera_2'].rotation_euler = (rot[0], rot[1], rot[2])
         #vis_results('hand_bone_1_none', 'bone_joints5', meshes)
         meshes = tensor_list_to_tensor(meshes)
         meshes = meshes.detach().clone().numpy()
         create_object(meshes[0], 'results')
         create_mesh_animation(meshes, 'results')
+        my_tool.c1 = c1.detach().clone().numpy()
+        my_tool.c2 = c2.detach().clone().numpy()
+        my_tool.loc_r = loc_r.detach().clone().numpy()
         return {'FINISHED'}
 
 
@@ -394,13 +413,21 @@ class VIEW3D_PT_pytorch_camera(bpy.types.Panel):
         row = self.layout.row()
         row.prop(my_tool, "collection_1")
         row.prop(my_tool, "collection_2")
-        self.layout.operator('pytorch.camera_save_epipole', text='save epipole')
-        self.layout.operator('pytorch.camera_position_pass1', text='camera position first pass')
-        self.layout.operator('pytorch.camera_position_pass2', text='camera position second pass')
-        self.layout.operator('pytorch.create_animation', text='create animation')
         row = self.layout.row()
-        row.prop(my_tool, "c")
-        row.prop(my_tool, "cam_flip")
+        row.prop(my_tool, "reduce_bool")
+        row.prop(my_tool, "reduce_amount")
+        row.prop(my_tool, "epochs")
+        row = self.layout.row()
+        row.prop(my_tool, "lr")
+        row.prop(my_tool, "c1")
+        row.prop(my_tool, "c2")
+        row.prop(my_tool, 'find_c')
+        row = self.layout.row()
+        #self.layout.operator('pytorch.camera_save_epipole', text='save epipole')
+        #self.layout.operator('pytorch.camera_position_pass1', text='camera position first pass')
+        self.layout.operator('pytorch.camera_position_pass2', text='find camera position')
+        #self.layout.operator('pytorch.create_animation', text='create animation')
+
        
 
 
